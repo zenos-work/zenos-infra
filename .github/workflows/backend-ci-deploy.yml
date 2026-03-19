@@ -51,7 +51,7 @@ jobs:
 
       - name: Run backend tests with coverage
         run: |
-          uv run pytest -q \
+          uv run --with pytest-cov pytest -q \
             --cov=src \
             --cov-branch \
             --cov-report=term-missing \
