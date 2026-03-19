@@ -1,0 +1,66 @@
+name: DB Migrate (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+        description: "staging or production"
+      run_migrate:
+        required: false
+        type: boolean
+        default: false
+        description: "Whether to run migration job"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate SQL files
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate migration and validator SQL file presence
+        run: |
+          set -e
+          for f in migrations/*.sql validators/*.sql; do
+            if [ ! -s "$f" ]; then
+              echo "Empty SQL file found: $f"
+              exit 1
+            fi
+          done
+
+  migrate:
+    name: Apply migrations
+    runs-on: ubuntu-latest
+    if: inputs.run_migrate
+    environment: ${{ inputs.environment }}
+    needs: validate
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install wrangler CLI
+        run: npm install -g wrangler@4
+
+      - name: Apply migrations
+        run: |
+          if [ "${{ inputs.environment }}" = "staging" ]; then
+            ./scripts/migrate.sh staging
+          else
+            ./scripts/migrate.sh prd
+          fi
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

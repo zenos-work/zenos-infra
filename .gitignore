@@ -35,3 +35,12 @@ override.tf.json
 # Ignore CLI configuration files
 .terraformrc
 terraform.rc
+
+# Local bootstrap/runtime files
+.env
+.env.local
+.env.*
+!.env.example
+.gradle/
+.local-dev/
+*.pid
