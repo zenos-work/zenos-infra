@@ -1,0 +1,154 @@
+name: PR Branch Enforcement (Reusable)
+
+# Enforces the branch promotion policy:
+#   development ──► staging ──► master
+#   master      ──► staging
+#   staging     ──► development
+#   master      ──► development
+#
+# Any PR that violates these rules is automatically closed and
+# a tracking issue is created.
+
+on:
+  workflow_call:
+    inputs:
+      allowed_head_for_development:
+        type: string
+        required: false
+        default: "staging,master"
+        description: "Comma-separated source branches allowed to target development"
+      allowed_head_for_staging:
+        type: string
+        required: false
+        default: "development,master"
+        description: "Comma-separated source branches allowed to target staging"
+      allowed_head_for_master:
+        type: string
+        required: false
+        default: "staging"
+        description: "Comma-separated source branches allowed to target master"
+
+permissions:
+  pull-requests: write
+  issues: write
+
+jobs:
+  enforce:
+    name: Enforce Branch Policy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check and enforce PR branch policy
+        uses: actions/github-script@v7
+        env:
+          ALLOWED_FOR_DEVELOPMENT: ${{ inputs.allowed_head_for_development }}
+          ALLOWED_FOR_STAGING: ${{ inputs.allowed_head_for_staging }}
+          ALLOWED_FOR_MASTER: ${{ inputs.allowed_head_for_master }}
+        with:
+          script: |
+            const base = context.payload.pull_request.base.ref;
+            const head = context.payload.pull_request.head.ref;
+            const prNumber = context.payload.pull_request.number;
+            const prTitle = context.payload.pull_request.title;
+            const prUrl = context.payload.pull_request.html_url;
+
+            const allowedForDevelopment = process.env.ALLOWED_FOR_DEVELOPMENT.split(',').map(s => s.trim());
+            const allowedForStaging     = process.env.ALLOWED_FOR_STAGING.split(',').map(s => s.trim());
+            const allowedForMaster       = process.env.ALLOWED_FOR_MASTER.split(',').map(s => s.trim());
+
+            let reason = null;
+
+            if (base === 'development' && !allowedForDevelopment.includes(head)) {
+              const allowed = allowedForDevelopment.map(b => `\`${b}\``).join(', ');
+              reason = `PRs to \`development\` are only allowed from ${allowed}. Got: \`${head}\``;
+            } else if (base === 'staging' && !allowedForStaging.includes(head)) {
+              const allowed = allowedForStaging.map(b => `\`${b}\``).join(', ');
+              reason = `PRs to \`staging\` are only allowed from ${allowed}. Got: \`${head}\``;
+            } else if (base === 'master' && !allowedForMaster.includes(head)) {
+              const allowed = allowedForMaster.map(b => `\`${b}\``).join(', ');
+              reason = `PRs to \`master\` are only allowed from ${allowed}. Got: \`${head}\``;
+            }
+
+            if (!reason) {
+              console.log(`✅ PR \`${head}\` → \`${base}\` is permitted.`);
+              return;
+            }
+
+            // Comment explaining the closure
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body: [
+                '## ❌ Branch Policy Violation — PR Auto-Closed',
+                '',
+                reason,
+                '',
+                '**Permitted promotion flow:**',
+                '```',
+                'development ──► staging ──► master',
+                '             ◄── staging and ◄── master (backmerge only, no deploy)',
+                'staging     ──► development and master ──► development (backmerge only, no deploy)',
+                '```',
+                '',
+                'Please open a new PR targeting the correct branch.'
+              ].join('\n')
+            });
+
+            // Close the PR
+            await github.rest.pulls.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+              state: 'closed'
+            });
+
+            // Ensure the label exists (create if missing)
+            try {
+              await github.rest.issues.getLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name: 'branch-policy-violation'
+              });
+            } catch {
+              await github.rest.issues.createLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name: 'branch-policy-violation',
+                color: 'd93f0b',
+                description: 'PR violated branching policy and was auto-closed'
+              });
+            }
+
+            // Open a tracking issue
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `[Branch Policy] Invalid PR auto-closed: \`${head}\` → \`${base}\``,
+              labels: ['branch-policy-violation'],
+              body: [
+                '## Branch Policy Violation',
+                '',
+                'A pull request was automatically closed for violating the branch promotion policy.',
+                '',
+                '| Field | Value |',
+
+                '|---|---|',
+                `| **PR** | [#${prNumber} — ${prTitle}](${prUrl}) |`,
+                `| **Source branch** | \`${head}\` |`,
+                `| **Target branch** | \`${base}\` |`,
+                `| **Reason** | ${reason} |`,
+                '',
+                '### Permitted Promotion Flow',
+                '```',
+                'development ──► staging ──► master',
+                '             ◄── staging          (backmerge, no deploy)',
+                '             ◄── master            (backmerge, no deploy)',
+                'staging     ──► development       (backmerge, no deploy)',
+                'master      ──► development       (backmerge, no deploy)',
+                '```',
+                '',
+                'Please open a corrected PR targeting the appropriate branch.'
+              ].join('\n')
+            });
+
+            core.setFailed(`Branch policy violation: ${reason}`);
