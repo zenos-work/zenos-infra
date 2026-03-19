@@ -74,11 +74,11 @@ jobs:
           covered_branches = int(totals.get("covered_branches", 0) or 0)
           branch_pct = (covered_branches / branches * 100.0) if branches > 0 else 0.0
 
-            output_file = os.environ.get("GITHUB_OUTPUT")
-            if not output_file:
+          output_file = os.environ.get("GITHUB_OUTPUT")
+          if not output_file:
               raise RuntimeError("GITHUB_OUTPUT is not set")
 
-            with open(output_file, "a", encoding="utf-8") as out:
+          with open(output_file, "a", encoding="utf-8") as out:
               out.write(f"line_pct={line_pct:.2f}\n")
               out.write(f"branch_pct={branch_pct:.2f}\n")
               out.write(f"num_branches={branches}\n")
