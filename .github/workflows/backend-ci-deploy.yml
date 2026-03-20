@@ -61,12 +61,12 @@ jobs:
       - name: Parse coverage metrics
         id: coverage_metrics
         run: |
-          python - << 'PY'
+          cat > /tmp/parse_backend_coverage.py <<'PY'
           import json
           import os
 
           with open("coverage.json", "r", encoding="utf-8") as f:
-              data = json.load(f)
+            data = json.load(f)
 
           totals = data.get("totals", {})
           line_pct = float(totals.get("percent_covered", 0.0))
@@ -76,13 +76,14 @@ jobs:
 
           output_file = os.environ.get("GITHUB_OUTPUT")
           if not output_file:
-              raise RuntimeError("GITHUB_OUTPUT is not set")
+            raise RuntimeError("GITHUB_OUTPUT is not set")
 
           with open(output_file, "a", encoding="utf-8") as out:
-              out.write(f"line_pct={line_pct:.2f}\n")
-              out.write(f"branch_pct={branch_pct:.2f}\n")
-              out.write(f"num_branches={branches}\n")
+            out.write(f"line_pct={line_pct:.2f}\n")
+            out.write(f"branch_pct={branch_pct:.2f}\n")
+            out.write(f"num_branches={branches}\n")
           PY
+          python /tmp/parse_backend_coverage.py
 
       - name: Enforce minimum backend coverage
         run: |
