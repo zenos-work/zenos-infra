@@ -47,24 +47,40 @@ jobs:
         run: pnpm run lint
 
       - name: Run frontend tests with coverage
-        run: pnpm run test -- --coverage --coverage.reporter=json-summary --coverage.reporter=text --coverage.reporter=lcov
+        run: pnpm exec vitest run --coverage --coverage.reporter=json-summary --coverage.reporter=text --coverage.reporter=lcov
 
       - name: Parse frontend coverage metrics
         id: coverage_metrics
         run: |
           node -e '
           const fs = require("fs");
-          const data = JSON.parse(fs.readFileSync("coverage/coverage-summary.json", "utf8"));
+          const outputFile = process.env.GITHUB_OUTPUT;
+          const coverageFile = "coverage/coverage-summary.json";
+
+          if (!outputFile) {
+            throw new Error("GITHUB_OUTPUT is not set");
+          }
+
+          if (!fs.existsSync(coverageFile)) {
+            throw new Error(`Coverage summary not found at ${coverageFile}`);
+          }
+
+          const data = JSON.parse(fs.readFileSync(coverageFile, "utf8"));
           const linePct = data.total.lines.pct || 0;
           const branchPct = data.total.branches.pct || 0;
-          fs.appendFileSync(process.env.GITHUB_OUTPUT, `line_pct=${linePct.toFixed(2)}\n`);
-          fs.appendFileSync(process.env.GITHUB_OUTPUT, `branch_pct=${branchPct.toFixed(2)}\n`);
+          fs.appendFileSync(outputFile, `line_pct=${linePct.toFixed(2)}\n`);
+          fs.appendFileSync(outputFile, `branch_pct=${branchPct.toFixed(2)}\n`);
           '
 
       - name: Enforce minimum frontend coverage
         run: |
           ACTUAL="${{ steps.coverage_metrics.outputs.line_pct }}"
           REQUIRED="${{ inputs.min_coverage }}"
+
+          if [ -z "$ACTUAL" ]; then
+            echo "Coverage parse failed: line_pct output is empty"
+            exit 1
+          fi
 
           echo "Frontend line coverage: ${ACTUAL}%"
           echo "Required minimum: ${REQUIRED}%"
