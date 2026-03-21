@@ -139,11 +139,102 @@ jobs:
       - name: Publish backend security summary
         if: always()
         run: |
-          {
-            echo "## Backend Security Scans";
-            echo "- Bandit report: generated";
-            echo "- pip-audit report: generated";
-          } >> "$GITHUB_STEP_SUMMARY"
+          python - <<'PY'
+          import json
+          import os
+          from collections import Counter
+          from pathlib import Path
+
+          summary_file = os.environ.get("GITHUB_STEP_SUMMARY")
+          if not summary_file:
+            raise RuntimeError("GITHUB_STEP_SUMMARY is not set")
+
+          summary_path = Path(summary_file)
+
+          bandit_path = Path("bandit-report.json")
+          pip_audit_path = Path("pip-audit-report.json")
+
+          lines = []
+          lines.append("## Backend Vulnerability Report")
+          lines.append("")
+
+          # Bandit summary
+          if bandit_path.exists():
+            try:
+              bandit = json.loads(bandit_path.read_text(encoding="utf-8"))
+              bandit_results = bandit.get("results", []) or []
+              severity_counts = Counter(
+                (item.get("issue_severity") or "UNKNOWN").upper()
+                for item in bandit_results
+              )
+
+              lines.append("### Bandit (SAST)")
+              lines.append("| Metric | Value |")
+              lines.append("|---|---:|")
+              lines.append(f"| Total findings | {len(bandit_results)} |")
+              lines.append(f"| High | {severity_counts.get('HIGH', 0)} |")
+              lines.append(f"| Medium | {severity_counts.get('MEDIUM', 0)} |")
+              lines.append(f"| Low | {severity_counts.get('LOW', 0)} |")
+              lines.append(f"| Unknown | {severity_counts.get('UNKNOWN', 0)} |")
+
+              if bandit_results:
+                lines.append("")
+                lines.append("Top findings:")
+                lines.append("| Severity | Rule | Location |")
+                lines.append("|---|---|---|")
+                for item in bandit_results[:10]:
+                  sev = (item.get("issue_severity") or "UNKNOWN").upper()
+                  rule = item.get("test_id") or "N/A"
+                  filename = item.get("filename") or "N/A"
+                  line_no = item.get("line_number") or "?"
+                  lines.append(f"| {sev} | {rule} | {filename}:{line_no} |")
+            except Exception as exc:
+              lines.append("### Bandit (SAST)")
+              lines.append(f"Could not parse Bandit report: {exc}")
+          else:
+            lines.append("### Bandit (SAST)")
+            lines.append("Bandit report missing")
+
+          lines.append("")
+
+          # pip-audit summary
+          if pip_audit_path.exists():
+            try:
+              pip_audit = json.loads(pip_audit_path.read_text(encoding="utf-8"))
+              deps = pip_audit.get("dependencies", []) or []
+              vuln_count = 0
+              affected_deps = []
+
+              for dep in deps:
+                vulns = dep.get("vulns", []) or []
+                if vulns:
+                  vuln_count += len(vulns)
+                  affected_deps.append((dep.get("name") or "unknown", len(vulns)))
+
+              lines.append("### pip-audit (Dependencies)")
+              lines.append("| Metric | Value |")
+              lines.append("|---|---:|")
+              lines.append(f"| Total vulnerabilities | {vuln_count} |")
+              lines.append(f"| Affected packages | {len(affected_deps)} |")
+              lines.append("| Severity data | Not provided by pip-audit JSON |")
+
+              if affected_deps:
+                lines.append("")
+                lines.append("Most affected packages:")
+                lines.append("| Package | Vulnerabilities |")
+                lines.append("|---|---:|")
+                for name, count in sorted(affected_deps, key=lambda x: x[1], reverse=True)[:10]:
+                  lines.append(f"| {name} | {count} |")
+            except Exception as exc:
+              lines.append("### pip-audit (Dependencies)")
+              lines.append(f"Could not parse pip-audit report: {exc}")
+          else:
+            lines.append("### pip-audit (Dependencies)")
+            lines.append("pip-audit report missing")
+
+          with summary_path.open("a", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+          PY
 
   deploy:
     name: Deploy Worker

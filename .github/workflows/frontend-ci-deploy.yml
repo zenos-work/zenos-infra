@@ -107,7 +107,14 @@ jobs:
             coverage/lcov.info
 
       - name: Security scan (pnpm audit)
-        run: pnpm audit --json > pnpm-audit-report.json
+        id: pnpm_audit
+        continue-on-error: true
+        run: |
+          set +e
+          pnpm audit --json > pnpm-audit-report.json
+          audit_exit=$?
+          echo "exit_code=${audit_exit}" >> "$GITHUB_OUTPUT"
+          exit 0
 
       - name: Upload frontend security report
         if: always()
@@ -119,10 +126,87 @@ jobs:
       - name: Publish frontend security summary
         if: always()
         run: |
-          {
-            echo "## Frontend Security Scan";
-            echo "- pnpm audit report: generated";
-          } >> "$GITHUB_STEP_SUMMARY"
+          node -e '
+          const fs = require("fs");
+
+          const summaryFile = process.env.GITHUB_STEP_SUMMARY;
+          if (!summaryFile) {
+            throw new Error("GITHUB_STEP_SUMMARY is not set");
+          }
+
+          const reportFile = "pnpm-audit-report.json";
+          const lines = [];
+          lines.push("## Frontend Vulnerability Report");
+          lines.push("");
+
+          if (!fs.existsSync(reportFile)) {
+            lines.push("pnpm audit report missing");
+          } else {
+            try {
+              const data = JSON.parse(fs.readFileSync(reportFile, "utf8"));
+              const vulnMeta =
+                data?.metadata?.vulnerabilities ||
+                data?.vulnerabilities ||
+                {};
+
+              const info = Number(vulnMeta.info || 0);
+              const low = Number(vulnMeta.low || 0);
+              const moderate = Number(vulnMeta.moderate || 0);
+              const high = Number(vulnMeta.high || 0);
+              const critical = Number(vulnMeta.critical || 0);
+              const total = Number(vulnMeta.total || info + low + moderate + high + critical);
+
+              lines.push("| Severity | Count |");
+              lines.push("|---|---:|");
+              lines.push(`| Critical | ${critical} |`);
+              lines.push(`| High | ${high} |`);
+              lines.push(`| Moderate | ${moderate} |`);
+              lines.push(`| Low | ${low} |`);
+              lines.push(`| Info | ${info} |`);
+              lines.push(`| Total | ${total} |`);
+
+              const advisories = data?.advisories || {};
+              const advisoryList = Object.values(advisories);
+
+              if (advisoryList.length > 0) {
+                lines.push("");
+                lines.push("Top advisories:");
+                lines.push("| Severity | Package | Title | URL |");
+                lines.push("|---|---|---|---|");
+
+                const rank = { critical: 5, high: 4, moderate: 3, low: 2, info: 1 };
+                advisoryList
+                  .sort((a, b) => (rank[(b.severity || "").toLowerCase()] || 0) - (rank[(a.severity || "").toLowerCase()] || 0))
+                  .slice(0, 10)
+                  .forEach((adv) => {
+                    const sev = adv.severity || "unknown";
+                    const pkg = adv.module_name || adv.name || "unknown";
+                    const title = (adv.title || "").replace(/\|/g, "\\|");
+                    const url = adv.url || "";
+                    lines.push(`| ${sev} | ${pkg} | ${title} | ${url} |`);
+                  });
+              }
+            } catch (err) {
+              lines.push(`Could not parse pnpm audit report: ${err.message}`);
+            }
+          }
+
+          fs.appendFileSync(summaryFile, lines.join("\n") + "\n");
+          '
+
+      - name: Enforce pnpm audit result
+        if: always()
+        run: |
+          exit_code="${{ steps.pnpm_audit.outputs.exit_code }}"
+          if [ -z "$exit_code" ]; then
+            echo "pnpm audit exit code missing; failing to avoid false green"
+            exit 1
+          fi
+
+          if [ "$exit_code" -ne 0 ]; then
+            echo "pnpm audit detected vulnerabilities (exit code: $exit_code)"
+            exit "$exit_code"
+          fi
 
       - name: Build frontend
         run: pnpm run build
