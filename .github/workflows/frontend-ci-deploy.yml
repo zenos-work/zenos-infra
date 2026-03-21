@@ -114,6 +114,7 @@ jobs:
           set +e
           pnpm audit --json > pnpm-audit-report.json
           audit_exit=$?
+          printf '%s' "$audit_exit" > .pnpm-audit-exit-code
           echo "exit_code=${audit_exit}" >> "$GITHUB_OUTPUT"
           exit 0
 
@@ -199,6 +200,11 @@ jobs:
         if: always()
         run: |
           exit_code="${{ steps.pnpm_audit.outputs.exit_code }}"
+
+          if [ -z "$exit_code" ] && [ -f .pnpm-audit-exit-code ]; then
+            exit_code="$(cat .pnpm-audit-exit-code)"
+          fi
+
           if [ -z "$exit_code" ]; then
             echo "pnpm audit exit code missing; failing to avoid false green"
             exit 1
