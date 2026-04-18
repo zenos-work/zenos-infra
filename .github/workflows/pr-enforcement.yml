@@ -55,15 +55,28 @@ jobs:
             const allowedForStaging     = process.env.ALLOWED_FOR_STAGING.split(',').map(s => s.trim());
             const allowedForMaster       = process.env.ALLOWED_FOR_MASTER.split(',').map(s => s.trim());
 
+            // Function to check if branch matches any allowed pattern (supports wildcards)
+            function branchMatches(branch, patterns) {
+              return patterns.some(pattern => {
+                if (pattern.includes('**')) {
+                  // Handle wildcard patterns like "feature/**"
+                  const prefix = pattern.replace('/**', '');
+                  return branch.startsWith(prefix + '/');
+                }
+                // Exact match for non-wildcard patterns
+                return branch === pattern;
+              });
+            }
+
             let reason = null;
 
-            if (base === 'development' && !allowedForDevelopment.includes(head)) {
+            if (base === 'development' && !branchMatches(head, allowedForDevelopment)) {
               const allowed = allowedForDevelopment.map(b => `\`${b}\``).join(', ');
               reason = `PRs to \`development\` are only allowed from ${allowed}. Got: \`${head}\``;
-            } else if (base === 'staging' && !allowedForStaging.includes(head)) {
+            } else if (base === 'staging' && !branchMatches(head, allowedForStaging)) {
               const allowed = allowedForStaging.map(b => `\`${b}\``).join(', ');
               reason = `PRs to \`staging\` are only allowed from ${allowed}. Got: \`${head}\``;
-            } else if (base === 'master' && !allowedForMaster.includes(head)) {
+            } else if (base === 'master' && !branchMatches(head, allowedForMaster)) {
               const allowed = allowedForMaster.map(b => `\`${b}\``).join(', ');
               reason = `PRs to \`master\` are only allowed from ${allowed}. Got: \`${head}\``;
             }
