@@ -15,7 +15,7 @@ on:
       allowed_head_for_development:
         type: string
         required: false
-        default: "staging,master"
+        default: "staging,master,fature/**"
         description: "Comma-separated source branches allowed to target development"
       allowed_head_for_staging:
         type: string
